@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>城市載客王</title>
+<style>
+*{box-sizing:border-box;-webkit-user-select:none;user-select:none;touch-action:none}
+html,body{margin:0;height:100%;overflow:hidden;background:#222;font-family:"Noto Sans TC",sans-serif}
+canvas{display:block}
+.chip{position:absolute;background:#f6f3ea;border-radius:14px;padding:8px 14px;font-weight:800;color:#1d2735;box-shadow:0 3px 0 #0004}
+#money{top:12px;left:12px;background:#1d2735;color:#f0b82e;font-size:22px}
+#msg{top:12px;left:50%;transform:translateX(-50%);font-size:14px;text-align:center;max-width:46%}
+#spd{bottom:150px;left:50%;transform:translateX(-50%);font-size:22px}
+#shopBtn{top:12px;right:12px;font-size:14px}
+#wheel{position:absolute;left:20px;bottom:24px;width:130px;height:130px;border-radius:50%;border:14px solid #1d2735;background:radial-gradient(circle,#f0b82e 0 12%,transparent 13%)}
+#wheel::after{content:"";position:absolute;left:50%;top:-14px;width:10px;height:18px;margin-left:-5px;background:#f0b82e;border-radius:4px}
+.pedal{position:absolute;bottom:24px;border-radius:14px;color:#fff;font-weight:800;display:flex;align-items:flex-end;justify-content:center;padding:10px;font-size:15px;box-shadow:0 5px 0 #0006}
+#gas{right:100px;width:90px;height:130px;background:#2b3748}
+#brk{right:12px;width:80px;height:100px;background:#d23a3a}
+#shop{position:absolute;inset:0;background:#000a;display:none;align-items:center;justify-content:center}
+#shopBox{background:#f6f3ea;border-radius:18px;padding:16px;width:min(92%,380px)}
+.car{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #0002;font-weight:700}
+button{font:inherit;font-weight:800;border:0;border-radius:10px;padding:8px 12px;background:#f0b82e}
+button:disabled{opacity:.5}
+</style>
+</head>
+<body>
+<div id="money" class="chip">$0</div>
+<div id="msg" class="chip">找路邊的黃色光柱接客!</div>
+<div id="spd" class="chip">0 km/h</div>
+<div id="shopBtn" class="chip">🚗 車行</div>
+<div id="wheel"></div>
+<div id="gas" class="pedal">油門</div>
+<div id="brk" class="pedal">煞車倒車</div>
+<div id="shop"><div id="shopBox"><h3 style="margin:0 0 8px">車行</h3><div id="list"></div><button id="close" style="margin-top:10px;width:100%">關閉</button></div></div>
+
+<script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
+<script>
+const scene=new THREE.Scene();
+scene.background=new THREE.Color(0x9fd3f5);
+scene.fog=new THREE.Fog(0x9fd3f5,60,200);
+const cam=new THREE.PerspectiveCamera(65,innerWidth/innerHeight,.1,400);
+const ren=new THREE.WebGLRenderer({antialias:true});
+ren.setSize(innerWidth,innerHeight);ren.setPixelRatio(Math.min(devicePixelRatio,2));
+ren.shadowMap.enabled=true;
+document.body.appendChild(ren.domElement);
+addEventListener('resize',()=>{ren.setSize(innerWidth,innerHeight);cam.aspect=innerWidth/innerHeight;cam.updateProjectionMatrix()});
+
+scene.add(new THREE.HemisphereLight(0xffffff,0x778899,.8));
+const sun=new THREE.DirectionalLight(0xffffff,.8);
+sun.position.set(80,120,40);sun.castShadow=true;
+sun.shadow.camera.left=-80;sun.shadow.camera.right=80;sun.shadow.camera.top=80;sun.shadow.camera.bottom=-80;
+sun.shadow.mapSize.set(1024,1024);
+scene.add(sun);scene.add(sun.target);
+
+const M=(c)=>new THREE.MeshLambertMaterial({color:c});
+const B=(w,h,d,c,x=0,y=0,z=0)=>{const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),M(c));m.position.set(x,y,z);m.castShadow=true;return m};
+
+// ===== 城市 =====
+const BLOCK=40,ROAD=14,N=7,SIZE=(BLOCK+ROAD)*N;
+const ground=new THREE.Mesh(new THREE.PlaneGeometry(SIZE+200,SIZE+200),M(0x8fbf7a));
+ground.rotation.x=-Math.PI/2;ground.receiveShadow=true;ground.position.y=-.05;scene.add(ground);
+const off=-SIZE/2;
+const colliders=[];
+function cx(i){return off+i*(BLOCK+ROAD)+ROAD/2+BLOCK/2+ROAD/2-ROAD/2}
+for(let i=0;i<=N;i++){
+  const p=off+i*(BLOCK+ROAD);
+  const r1=new THREE.Mesh(new THREE.PlaneGeometry(SIZE,ROAD),M(0x4a4f5e));
+  r1.rotation.x=-Math.PI/2;r1.position.set(0,0,p);scene.add(r1);
+  const r2=new THREE.Mesh(new THREE.PlaneGeometry(ROAD,SIZE),M(0x4a4f5e));
+  r2.rotation.x=-Math.PI/2;r2.position.set(p,0,0);scene.add(r2);
+}
+const bcol=[0xe8d8b8,0xf1b6a0,0xb8d4e8,0xd9c2e9,0xf3e3a0];
+for(let i=0;i<N;i++)for(let j=0;j<N;j++){
+  const x=off+i*(BLOCK+ROAD)+ROAD/2+BLOCK/2,z=off+j*(BLOCK+ROAD)+ROAD/2+BLOCK/2;
+  const side=new THREE.Mesh(new THREE.BoxGeometry(BLOCK,.4,BLOCK),M(0xd8d2c4));
+  side.position.set(x,.2,z);side.receiveShadow=true;scene.add(side);
+  const n=2;
+  for(let a=0;a<n;a++)for(let b=0;b<n;b++){
+    const w=BLOCK/2-5,h=8+Math.random()*28;
+    const bx=x+(a-.5)*BLOCK/2,bz=z+(b-.5)*BLOCK/2;
+    scene.add(B(w,h,w,bcol[(Math.random()*5)|0],bx,h/2+.4,bz));
+    colliders.push({x:bx,z:bz,r:w/2+.5,sq:true,hw:w/2});
+  }
+}
+// 路中央虛線
+const dash=M(0xf5f5f5);
+for(let i=0;i<=N;i++){const p=off+i*(BLOCK+ROAD);
+  for(let t=-SIZE/2;t<SIZE/2;t+=6){
+    let d=new THREE.Mesh(new THREE.PlaneGeometry(3,.4),dash);d.rotation.x=-Math.PI/2;d.position.set(t,.02,p);scene.add(d);
+    d=new THREE.Mesh(new THREE.PlaneGeometry(.4,3),dash);d.rotation.x=-Math.PI/2;d.position.set(p,.02,t);scene.add(d);
+  }}
+const LIM=SIZE/2+10;
+
+// ===== 車子 =====
+const CARS=[
+ {name:'小白車',price:0,color:0xf8f1e4,vmax:28,acc:14,turn:1.8},
+ {name:'紅色跑車',price:600,color:0xd23a3a,vmax:40,acc:20,turn:2.0},
+ {name:'藍色休旅',price:1500,color:0x2f6fb5,vmax:50,acc:26,turn:2.0},
+ {name:'黃色超跑',price:3500,color:0xf0b82e,vmax:65,acc:36,turn:2.2},
+ {name:'黑色旗艦',price:8000,color:0x23262d,vmax:80,acc:46,turn:2.3}
+];
+let owned=[true,false,false,false,false],cur=0;
+const car=new THREE.Group();scene.add(car);
+let body;
+function buildCar(){
+  while(car.children.length)car.remove(car.children[0]);
+  const c=CARS[cur].color;
+  car.add(B(2,.8,4.4,c,0,.8,0));
+  car.add(B(1.7,.7,2.2,0x2d4a63,0,1.5,-.2));
+  [[-1,1.4],[1,1.4],[-1,-1.4],[1,-1.4]].forEach(p=>car.add(B(.35,.7,.8,0x1a1a1a,p[0]*1.05,.4,p[1])));
+  car.add(B(.4,.25,.1,0xff3333,-.7,1,2.2));car.add(B(.4,.25,.1,0xff3333,.7,1,2.2));
+  car.add(B(.4,.25,.1,0xffffcc,-.7,1,-2.2));car.add(B(.4,.25,.1,0xffffcc,.7,1,-2.2));
+}
+buildCar();
+car.position.set(off+ROAD/2+BLOCK+ROAD/2,0,off+ROAD/2+BLOCK+ROAD/2);
+let heading=0,speed=0,steer=0,money=0,passenger=null;
+// heading: 前進方向為 (sin h, cos h) 的反向使用 -z 為前方
+
+// ===== 乘客 =====
+function makePerson(){
+  const g=new THREE.Group();
+  g.add(B(.7,1.1,.5,0xe08a1e,0,1,0));
+  const head=new THREE.Mesh(new THREE.SphereGeometry(.4,12,10),M(0xe9b08a));head.position.y=2;head.castShadow=true;g.add(head);
+  g.add(B(.25,.7,.25,0x333,-.18,.35,0));g.add(B(.25,.7,.25,0x333,.18,.35,0));
+  return g;
+}
+function roadPoint(){
+  const i=(Math.random()*(N+1))|0,t=(Math.random()-.5)*(SIZE-30);
+  const p=off+i*(BLOCK+ROAD),s=ROAD/2+.8;
+  return Math.random()<.5?{x:t,z:p+(Math.random()<.5?s:-s)}:{x:p+(Math.random()<.5?s:-s),z:t};
+}
+const pax=[];
+function spawnPax(){
+  const pos=roadPoint();
+  const g=new THREE.Group();g.add(makePerson());
+  const beam=new THREE.Mesh(new THREE.CylinderGeometry(1.5,1.5,40,16,1,true),new THREE.MeshBasicMaterial({color:0xf0b82e,transparent:true,opacity:.35}));
+  beam.position.y=20;g.add(beam);
+  g.position.set(pos.x,0,pos.z);scene.add(g);pax.push(g);
+}
+for(let i=0;i<10;i++)spawnPax();
+let dest=null;
+const destMark=new THREE.Mesh(new THREE.CylinderGeometry(2.5,2.5,40,16,1,true),new THREE.MeshBasicMaterial({color:0x3cb371,transparent:true,opacity:.4}));
+destMark.visible=false;scene.add(destMark);
+const msg=document.getElementById('msg');
+function say(t){msg.textContent=t}
+
+// ===== 操作 =====
+let gas=false,brk=false;
+const gasEl=document.getElementById('gas'),brkEl=document.getElementById('brk'),wheel=document.getElementById('wheel');
+const on=(el,f)=>{el.addEventListener('pointerdown',e=>{f(true);e.preventDefault()});['pointerup','pointercancel','pointerleave'].forEach(n=>el.addEventListener(n,()=>f(false)))};
+on(gasEl,v=>gas=v);on(brkEl,v=>brk=v);
+let wheelAng=0,dragging=false;
+function wheelPos(e){const r=wheel.getBoundingClientRect();return Math.atan2(e.clientX-(r.left+r.width/2),-(e.clientY-(r.top+r.height/2)))}
+wheel.addEventListener('pointerdown',e=>{dragging=true;wheel.setPointerCapture(e.pointerId)});
+wheel.addEventListener('pointermove',e=>{if(!dragging)return;wheelAng=Math.max(-1.2,Math.min(1.2,wheelPos(e)));steer=wheelAng/1.2});
+const endW=()=>{dragging=false;steer=0;wheelAng=0;wheel.style.transform=''};
+wheel.addEventListener('pointerup',endW);wheel.addEventListener('pointercancel',endW);
+const keys={};
+addEventListener('keydown',e=>keys[e.key]=true);addEventListener('keyup',e=>keys[e.key]=false);
+
+// ===== 車行 =====
+const shop=document.getElementById('shop'),list=document.getElementById('list');
+function renderShop(){
+  list.innerHTML='';
+  CARS.forEach((c,i)=>{
+    const d=document.createElement('div');d.className='car';
+    d.innerHTML=`<span>${c.name}<br><small>極速 ${c.vmax}</small></span>`;
+    const b=document.createElement('button');
+    if(owned[i]){b.textContent=cur===i?'使用中':'使用';b.disabled=cur===i}
+    else{b.textContent='$'+c.price;b.disabled=money<c.price}
+    b.onclick=()=>{
+      if(!owned[i]){money-=c.price;owned[i]=true}
+      cur=i;buildCar();renderShop();updateMoney();save();
+    };
+    d.appendChild(b);list.appendChild(d);
+  });
+}
+document.getElementById('shopBtn').onclick=()=>{renderShop();shop.style.display='flex'};
+document.getElementById('close').onclick=()=>shop.style.display='none';
+const moneyEl=document.getElementById('money');
+function updateMoney(){moneyEl.textContent='$'+Math.floor(money)}
+function save(){localStorage.setItem('cityTaxi',JSON.stringify({money,owned,cur}))}
+try{const s=JSON.parse(localStorage.getItem('cityTaxi'));if(s){money=s.money;owned=s.owned;cur=s.cur;buildCar();updateMoney()}}catch(e){}
+
+// ===== 主迴圈 =====
+const clock=new THREE.Clock();
+function loop(){
+  requestAnimationFrame(loop);
+  const dt=Math.min(clock.getDelta(),.05);
+  const C=CARS[cur];
+  const g=gas||keys.ArrowUp,b=brk||keys.ArrowDown;
+  let st=steer;if(keys.ArrowLeft)st=-1;if(keys.ArrowRight)st=1;
+  if(g)speed+=C.acc*dt;
+  else if(b){speed-=C.acc*1.6*dt}
+  else speed*=1-1.2*dt;
+  speed=Math.max(-12,Math.min(C.vmax,speed));
+  if(Math.abs(speed)<.05&&!g&&!b)speed=0;
+  heading-=st*C.turn*dt*Math.min(1,Math.abs(speed)/8)*Math.sign(speed||1);
+  const fx=-Math.sin(heading),fz=-Math.cos(heading);
+  let nx=car.position.x+fx*speed*dt,nz=car.position.z+fz*speed*dt;
+  let hit=false;
+  for(const c of colliders){
+    if(Math.abs(nx-c.x)<c.hw+1.2&&Math.abs(nz-c.z)<c.hw+1.2){hit=true;break}
+  }
+  if(Math.abs(nx)>LIM||Math.abs(nz)>LIM)hit=true;
+  if(hit){speed*=-.3}else{car.position.x=nx;car.position.z=nz}
+  car.rotation.y=heading;
+  wheel.style.transform=`rotate(${(dragging?wheelAng:st*1.2)}rad)`;
+  document.getElementById('spd').textContent=Math.round(Math.abs(speed)*3.6)+' km/h';
+
+  // 追尾視角
+  const back=new THREE.Vector3(Math.sin(heading)*9,4.5,Math.cos(heading)*9);
+  const target=car.position.clone().add(back);
+  cam.position.lerp(target,1-Math.pow(.001,dt));
+  cam.lookAt(car.position.x-fx*6,2,car.position.z-fz*6);
+  sun.position.set(car.position.x+80,120,car.position.z+40);sun.target.position.copy(car.position);
+
+  // 載客
+  const slow=Math.abs(speed)<6;
+  if(!passenger){
+    for(let i=0;i<pax.length;i++){
+      const p=pax[i];
+      if(p.position.distanceTo(car.position)<5&&slow){
+        scene.remove(p);pax.splice(i,1);
+        passenger=true;
+        const d=roadPoint();dest=d;
+        destMark.position.set(d.x,20,d.z);destMark.visible=true;
+        say('上車了!開到綠色光柱');
+        break;
+      }
+    }
+  }else{
+    const dd=Math.hypot(dest.x-car.position.x,dest.z-car.position.z);
+    if(dd<6&&slow){
+      const fare=Math.round(30+dd*0+Math.hypot(dest.x,dest.z)*.3+20);
+      money+=fare;passenger=null;destMark.visible=false;
+      updateMoney();save();spawnPax();
+      say('抵達!賺了 $'+fare);
+    }else say('距離目的地 '+Math.round(dd)+' m');
+  }
+  while(pax.length<10)spawnPax();
+  pax.forEach(p=>p.children[1].material.opacity=.25+.15*Math.sin(clock.elapsedTime*3));
+  ren.render(scene,cam);
+}
+loop();
+</script>
+</body>
+</html>
